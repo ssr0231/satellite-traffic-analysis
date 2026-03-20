@@ -362,3 +362,173 @@ plt.xlim(-8000, 8000)
 plt.ylim(-8000, 8000)
 
 plt.show()
+
+
+# ---- Identify High-Risk Satellites ----
+
+risk_score_map = {}
+
+for i, j, d, r in collision_data:
+    
+    risk_score_map[i] = risk_score_map.get(i, 0) + r
+    risk_score_map[j] = risk_score_map.get(j, 0) + r
+
+# sort satellites by risk
+high_risk_satellites = sorted(risk_score_map.items(), key=lambda x: x[1], reverse=True)
+
+print("\nTop 5 High-Risk Satellites:")
+for sat, score in high_risk_satellites[:5]:
+    print(f"Satellite {sat} -> Risk Score: {score:.4f}")
+
+
+# ---- Smart Optimization (Search Best Angle Shift) ----
+
+optimized_data = sample_data.copy()
+
+# candidate shifts (in radians)
+angle_options = [np.radians(x) for x in [-5, -2, 2, 5]]
+
+top_sat_indices = [sat for sat, _ in high_risk_satellites[:5]]
+
+for idx in top_sat_indices:
+    
+    best_angle = optimized_data.at[idx, "ANGLE"]
+    min_risk = float('inf')
+    
+    original_angle = optimized_data.at[idx, "ANGLE"]
+    
+    for shift in angle_options:
+        
+        test_angle = original_angle + shift
+        
+        x = optimized_data.at[idx, "RADIUS"] * np.cos(test_angle)
+        y = optimized_data.at[idx, "RADIUS"] * np.sin(test_angle)
+        
+        total_risk = 0
+        
+        for j in range(len(optimized_data)):
+            if j == idx:
+                continue
+                
+            dx = x - optimized_data.iloc[j]["X"]
+            dy = y - optimized_data.iloc[j]["Y"]
+            
+            dist = np.sqrt(dx**2 + dy**2)
+            
+            if dist < threshold and dist != 0:
+                total_risk += 1 / (dist + 1)
+        
+        if total_risk < min_risk:
+            min_risk = total_risk
+            best_angle = test_angle
+    
+    optimized_data.at[idx, "ANGLE"] = best_angle
+
+# recalculate positions
+optimized_data["X"] = optimized_data["RADIUS"] * np.cos(optimized_data["ANGLE"])
+optimized_data["Y"] = optimized_data["RADIUS"] * np.sin(optimized_data["ANGLE"])
+
+
+# ---- Recalculate Collision Risk After Optimization ----
+
+new_collision_data = []
+
+for i in range(len(optimized_data)):
+    for j in range(i+1, len(optimized_data)):
+        
+        dx = optimized_data.iloc[i]["X"] - optimized_data.iloc[j]["X"]
+        dy = optimized_data.iloc[i]["Y"] - optimized_data.iloc[j]["Y"]
+        
+        distance = np.sqrt(dx**2 + dy**2)
+        
+        if distance < threshold:
+            
+            if distance == 0:
+                continue
+            
+            risk = 1 / (distance + 1)
+            new_collision_data.append((i, j, distance, risk))
+
+print("\nNew total risky pairs:", len(new_collision_data))
+
+
+# ---- Improved Before vs After Visualization ----
+
+plt.figure(figsize=(14,6))
+
+# identify top risky satellites
+top_sat_indices = [sat for sat, _ in high_risk_satellites[:10]]
+
+
+# ---- BEFORE ----
+plt.subplot(1, 2, 1)
+
+# base satellites
+plt.scatter(
+    sample_data["X"],
+    sample_data["Y"],
+    s=10,
+    alpha=0.3,
+    color='blue',
+    label="Satellites"
+)
+
+# highlight risky satellites
+plt.scatter(
+    sample_data.iloc[top_sat_indices]["X"],
+    sample_data.iloc[top_sat_indices]["Y"],
+    s=40,
+    color='red',
+    label="High Risk Satellites"
+)
+
+plt.title(f"Before Optimization\nRisky Pairs: {len(collision_data)}", fontsize=13, fontweight='bold')
+plt.xlabel("Orbital X (km)")
+plt.ylabel("Orbital Y (km)")
+
+plt.xlim(-8000, 8000)
+plt.ylim(-8000, 8000)
+
+plt.grid(alpha=0.3)
+plt.legend()
+
+
+# ---- AFTER ----
+plt.subplot(1, 2, 2)
+
+# base satellites
+plt.scatter(
+    optimized_data["X"],
+    optimized_data["Y"],
+    s=10,
+    alpha=0.3,
+    color='green',
+    label="Satellites"
+)
+
+# highlight same satellites after optimization
+plt.scatter(
+    optimized_data.iloc[top_sat_indices]["X"],
+    optimized_data.iloc[top_sat_indices]["Y"],
+    s=40,
+    color='orange',
+    label="Optimized High Risk"
+)
+
+plt.title(f"After Optimization\nRisky Pairs: {len(new_collision_data)}", fontsize=13, fontweight='bold')
+plt.xlabel("Orbital X (km)")
+plt.ylabel("Orbital Y (km)")
+
+plt.xlim(-8000, 8000)
+plt.ylim(-8000, 8000)
+
+plt.grid(alpha=0.3)
+plt.legend()
+
+
+plt.suptitle("Collision Risk Optimization Comparison", fontsize=16, fontweight='bold')
+
+plt.tight_layout()
+plt.show()
+
+
